@@ -1,0 +1,11 @@
+import pandas as pd
+#idea: macros 
+#how to leverage business insights: rating scores
+#consulting group: if a restaurant or cafe is seeking a type of recipe for a specific diet
+#we also will use recipes to consult potential recipe makers that want to upload their recipes online 
+#and compare recipe types with others, considering the season, nearby holidays, time it takes, etc.
+
+#nutrition 
+#food calculations
+#how we can reduce the calories by comparing it to our calories 
+#what foods are associated with lower BMIs?
