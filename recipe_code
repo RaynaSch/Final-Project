@@ -1,0 +1,44 @@
+import pandas as pd
+import plotly.express as px
+import dash
+import requests
+from dash import dcc, html, Output, Input
+import requests as r
+
+myplate = "https://myplate.food/api/v1/recipes"
+r = requests.get(myplate)
+for key, value in r.json().items():
+    print(key + ":" + str(value))
+
+app = dash.Dash(__name__)
+
+# Update the code.
+app.layout = html.Div([
+  html.H1('Recipe by Category'),
+  html.Div(
+    children=[
+    html.Div(
+        children=[
+        html.H2('Controls'),
+        html.Br(),
+        html.H3('Recipe Select'),
+        dcc.Dropdown(id='recipe_dd',
+        options=[
+            {'label':'PRO', 'value':'Protein'},
+            {'label':'VEG', 'value':'Vegetables'},
+            {'label':'DAR', 'value':'Dairy'},
+            {'label':'GRA', 'value':'Grains'},
+            {'label':'FRU', 'value':'Fruits'}],
+            style={'width':'200px', 'margin':'0 auto'})
+        ],
+        style={'width':'350px', 'height':'350px', 'display':'inline-block', 'vertical-align':'top', 'border':'1px solid black', 'padding':'20px'}),
+    html.Div(children=[
+            dcc.Graph(id='major_cat'),
+            html.H2('Major Category',
+            style={ 'border':'2px solid black', 'width':'200px', 'margin':'0 auto'})
+            ],
+             style={'width':'700px','display':'inline-block'}
+             ),
+    ])],
+  style={'text-align':'center', 'display':'inline-block', 'width':'100%'}
+  )
