@@ -19,4 +19,4 @@ import pandas as pd
 #filter that attaches with everything 
 #so like low cal + 5 star shows top 5 of that 
 #change one thing it should all update 
-#avg calories (low , med, high) for drop-down
+#avg calories (low 75, med 150, high 150<) for drop-down
