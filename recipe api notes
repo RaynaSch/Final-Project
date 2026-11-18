@@ -9,3 +9,14 @@ import pandas as pd
 #food calculations
 #how we can reduce the calories by comparing it to our calories 
 #what foods are associated with lower BMIs?
+
+
+# additions: 
+#avg rating ( 1-5 )
+#- should change as you click on things
+    most popular recipes
+#top 5 popular recipes 
+#filter that attaches with everything 
+#so like low cal + 5 star shows top 5 of that 
+#change one thing it should all update 
+#avg calories (low , med, high) for drop-down
