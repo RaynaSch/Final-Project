@@ -39,7 +39,7 @@ def to_df(results):
             "ratings": rating.get("count", 0),      
         })
     return pd.DataFrame(rows)
-# Adeswa add doc string
+# Adesuwa add doc string
 
 def load_all_recipes():
     results, offset = [], 0
@@ -62,7 +62,7 @@ def load_all_recipes():
             break
         time.sleep(0.4)
     return to_df(results).drop_duplicates(subset="url").reset_index(drop=True)
-# Adeswa add docstring
+# Adesuwa add docstring
 
 LOAD_ERROR = None
 try:
@@ -95,7 +95,7 @@ def empty_fig(title):
     fig = px.bar(title=title)
     fig.update_layout(xaxis={"visible": False}, yaxis={"visible": False})
     return fig
-# Adeswa add docstring
+# Adesuwa add docstring
 
 # Create layouts for the dashboard
 def box_style(**extra):
@@ -112,12 +112,12 @@ def make_control(label, component):
                     style={"width": "220px", "display": "inline-block",
                            "margin": "8px", "verticalAlign": "top",
                            "textAlign": "left"})
-# Adeswa add docstring
+# Adesuwa add docstring
 
 def make_dropdown(label, dd_id, options, placeholder):
     return make_control(label, dcc.Dropdown(id=dd_id, options=options,
                                             placeholder=placeholder, clearable=True))
-# Adeswa add docstring
+# Adesuwa add docstring
 
 def recipe_card(rank, r):
     """One top-5 entry: rank, thumbnail (html.Img), linked name, calories"""
@@ -136,7 +136,7 @@ def recipe_card(rank, r):
     ], style={"display": "inline-block", "verticalAlign": "top",
               "marginLeft": "12px"}))
     return html.Div(pieces, style={"textAlign": "left", "margin": "10px 0"})
-# Adeswa add docstring
+# Adesuwa add docstring
 
 # Layout of the dashboard
 app = dash.Dash(__name__)
@@ -266,7 +266,7 @@ def update_dashboard(category, group, cal, min_rating):
     return (rows, 0, f"{len(df):,} recipes match", avg,
             "Average of the ratings of every matching recipe", cards,
             fig_count, fig_cal)
-# Adeswa add docstring
+# Adesuwa add docstring
 
 if __name__ == '__main__':
     app.run(debug=False)
