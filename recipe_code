@@ -1,19 +1,5 @@
-"""MyPlate recipe dashboard (MGS 627).
-
-At startup the app pulls the full MyPlate Kitchen recipe list once (about 11
-requests of 100 recipes) and keeps it in memory only, nothing is written to
-disk. Every filter, chart, the average rating and the top 5 are then computed
-from that one table.
-
-Note: the myplate.food API terms describe the free tier as live, per-request
-use and say bulk retrieval of the collection needs a license
-(https://myplate.food/for-professionals). Loading everything is a deliberate
-choice for this class project; ask the site for permission before sharing or
-deploying the app publicly.
-"""
 import time
 from datetime import datetime
-
 import dash
 import pandas as pd
 import plotly.express as px
@@ -22,22 +8,20 @@ from dash import dcc, html, dash_table
 from dash.dependencies import Input, Output
 
 API = "https://myplate.food/api/v1/recipes"
-API_MAX_LIMIT = 100     # the API's maximum "limit" per request
-PAGE_SIZE = 25          # rows per table page
+API_MAX_LIMIT = 100     
+PAGE_SIZE = 25          
 
-AUTHOR = "Annie,Rayna, Adeswua"        # edit these two for the byline under the title
+AUTHOR = "Annie, Rayna, Adeswua"         
 ROLE = "MGS 627"
 
+# MyPlate category and food group breakdowns
 CATEGORIES = ["Main dish", "Side dish", "Salad", "Soup", "Sauce",
               "Dessert", "Breakfast", "Bread", "Snack", "Beverage"]
 FOOD_GROUPS = [("Vegetables", "vegetables"), ("Fruits", "fruits"),
                ("Grains", "grains"), ("Protein foods", "protein-foods"),
                ("Dairy", "dairy")]
 
-
-# --------------------------------------------------------------------------
-# Load all recipes once (in memory)
-# --------------------------------------------------------------------------
+# Load all recipes
 def to_df(results):
     rows = []
     for r in results:
@@ -50,15 +34,14 @@ def to_df(results):
             "category": r.get("category", ""),
             "group_list": groups,
             "food_groups": ", ".join(groups),
-            "calories": r.get("calories"),          # per serving
+            "calories": r.get("calories"),          
             "rating": rating.get("value"),
-            "ratings": rating.get("count", 0),      # number of ratings = popularity
+            "ratings": rating.get("count", 0),      
         })
     return pd.DataFrame(rows)
-
+# Adeswa add doc string
 
 def load_all_recipes():
-    """Page through the list endpoint, politely (retry on 429, short pauses)."""
     results, offset = [], 0
     while True:
         for _ in range(3):
@@ -79,21 +62,18 @@ def load_all_recipes():
             break
         time.sleep(0.4)
     return to_df(results).drop_duplicates(subset="url").reset_index(drop=True)
-
+# Adeswa add docstring
 
 LOAD_ERROR = None
 try:
     ALL_DF = load_all_recipes()
     print(f"Loaded {len(ALL_DF):,} recipes")
-except Exception as exc:                       # keep the app up and say what failed
+except Exception as exc:                     
     LOAD_ERROR = f"Could not load recipes: {exc}"
     ALL_DF = to_df([])
     print(LOAD_ERROR)
 
-
-# --------------------------------------------------------------------------
-# One filter function drives everything
-# --------------------------------------------------------------------------
+# Create a filter to affect everything
 def filter_df(category, group, cal, min_rating):
     df = ALL_DF
     if category:
@@ -115,13 +95,11 @@ def empty_fig(title):
     fig = px.bar(title=title)
     fig.update_layout(xaxis={"visible": False}, yaxis={"visible": False})
     return fig
+# Adeswa add docstring
 
-
-# --------------------------------------------------------------------------
-# Reusable components and styles (DRY, as in the class notes)
-# --------------------------------------------------------------------------
+# Create layouts for the dashboard
 def box_style(**extra):
-    """Shared 'box model' styling: border, padding, margin."""
+    """Shared 'box model' styling: border, padding, margin"""
     style = {"border": "1px solid #ccc", "borderRadius": "8px",
              "padding": "12px", "margin": "10px"}
     style.update(extra)
@@ -129,20 +107,20 @@ def box_style(**extra):
 
 
 def make_control(label, component):
-    """A labelled control that sits side by side with the others (inline-block)."""
+    """A labelled control that sits side by side with the others"""
     return html.Div([html.Label(label), component],
                     style={"width": "220px", "display": "inline-block",
                            "margin": "8px", "verticalAlign": "top",
                            "textAlign": "left"})
-
+# Adeswa add docstring
 
 def make_dropdown(label, dd_id, options, placeholder):
     return make_control(label, dcc.Dropdown(id=dd_id, options=options,
                                             placeholder=placeholder, clearable=True))
-
+# Adeswa add docstring
 
 def recipe_card(rank, r):
-    """One top-5 entry: rank, thumbnail (html.Img), linked name, calories."""
+    """One top-5 entry: rank, thumbnail (html.Img), linked name, calories"""
     pieces = [html.B(f"{rank}.  ")]
     if isinstance(r.image_url, str) and r.image_url:
         pieces.append(html.Img(src=r.image_url,
@@ -158,11 +136,9 @@ def recipe_card(rank, r):
     ], style={"display": "inline-block", "verticalAlign": "top",
               "marginLeft": "12px"}))
     return html.Div(pieces, style={"textAlign": "left", "margin": "10px 0"})
+# Adeswa add docstring
 
-
-# --------------------------------------------------------------------------
-# Layout
-# --------------------------------------------------------------------------
+# Layout of the dashboard
 app = dash.Dash(__name__)
 
 half = {"width": "49%", "display": "inline-block", "verticalAlign": "top"}
@@ -230,9 +206,7 @@ app.layout = html.Div([
 ], style={"maxWidth": "1100px", "margin": "0 auto", "fontFamily": "sans-serif"})
 
 
-# --------------------------------------------------------------------------
-# One callback: change any filter and everything updates together
-# --------------------------------------------------------------------------
+# App callback
 @app.callback(
     Output(component_id="recipe_table", component_property="data"),
     Output(component_id="recipe_table", component_property="page_current"),
@@ -257,7 +231,7 @@ def update_dashboard(category, group, cal, min_rating):
         blank = empty_fig("No recipes match these filters")
         return [], 0, "0 recipes match", "–", "No recipes match these filters.", [], blank, blank
 
-    # Table rows (recipe name is a clickable link)
+    # Table rows with links
     rows = []
     for rec in df.sort_values("name").to_dict("records"):
         safe = rec["name"].replace("[", "(").replace("]", ")")
@@ -292,7 +266,7 @@ def update_dashboard(category, group, cal, min_rating):
     return (rows, 0, f"{len(df):,} recipes match", avg,
             "Average of the ratings of every matching recipe", cards,
             fig_count, fig_cal)
-
+# Adeswa add docstring
 
 if __name__ == '__main__':
     app.run(debug=False)
