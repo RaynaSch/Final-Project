@@ -1,81 +1,300 @@
+"""MyPlate recipe dashboard (MGS 627).
+
+At startup the app pulls the full MyPlate Kitchen recipe list once (about 11
+requests of 100 recipes) and keeps it in memory only, nothing is written to
+disk. Every filter, chart, the average rating and the top 5 are then computed
+from that one table.
+
+Note: the myplate.food API terms describe the free tier as live, per-request
+use and say bulk retrieval of the collection needs a license
+(https://myplate.food/for-professionals). Loading everything is a deliberate
+choice for this class project; ask the site for permission before sharing or
+deploying the app publicly.
+"""
+import time
+from datetime import datetime
+
+import dash
 import pandas as pd
 import plotly.express as px
-import requests as r
-from dash import Dash, dcc, html, Output, Input
+import requests
+from dash import dcc, html, dash_table
+from dash.dependencies import Input, Output
 
-URL = "https://myplate.food/api/v1/recipes"
+API = "https://myplate.food/api/v1/recipes"
+API_MAX_LIMIT = 100     # the API's maximum "limit" per request
+PAGE_SIZE = 25          # rows per table page
 
-resp = r.get(URL, timeout=10)
-resp.raise_for_status()          # fails loudly if the request didn't work
-response = resp.json()
+AUTHOR = "Annie,Rayna, Adeswua"        # edit these two for the byline under the title
+ROLE = "MGS 627"
 
-# Build the DataFrame once, at startup
-recipes_df = pd.DataFrame([
-    {
-        "name": rec["name"],
-        "category": rec["category"],
-        "calories": rec["calories"],
-        "rating": rec["rating"]["value"],
-    }
-    for rec in response["results"]
-])
-print(recipes_df.head())         # sanity check: is there data?
+CATEGORIES = ["Main dish", "Side dish", "Salad", "Soup", "Sauce",
+              "Dessert", "Breakfast", "Bread", "Snack", "Beverage"]
+FOOD_GROUPS = [("Vegetables", "vegetables"), ("Fruits", "fruits"),
+               ("Grains", "grains"), ("Protein foods", "protein-foods"),
+               ("Dairy", "dairy")]
 
-app = Dash(__name__)
+
+# --------------------------------------------------------------------------
+# Load all recipes once (in memory)
+# --------------------------------------------------------------------------
+def to_df(results):
+    rows = []
+    for r in results:
+        rating = r.get("rating") or {}
+        groups = r.get("food_groups", [])
+        rows.append({
+            "name": r["name"],
+            "url": r["recipe_url"],
+            "image_url": r.get("image_url"),
+            "category": r.get("category", ""),
+            "group_list": groups,
+            "food_groups": ", ".join(groups),
+            "calories": r.get("calories"),          # per serving
+            "rating": rating.get("value"),
+            "ratings": rating.get("count", 0),      # number of ratings = popularity
+        })
+    return pd.DataFrame(rows)
+
+
+def load_all_recipes():
+    """Page through the list endpoint, politely (retry on 429, short pauses)."""
+    results, offset = [], 0
+    while True:
+        for _ in range(3):
+            resp = requests.get(API, params={"limit": API_MAX_LIMIT, "offset": offset},
+                                timeout=20)
+            if resp.status_code == 429:
+                time.sleep(float(resp.headers.get("Retry-After", 5)) + 1)
+                continue
+            resp.raise_for_status()
+            break
+        else:
+            raise RuntimeError("Rate limited by myplate.food; wait a minute and restart.")
+        data = resp.json()
+        page = data.get("results", [])
+        results.extend(page)
+        offset += len(page)
+        if not page or offset >= data.get("total", 0):
+            break
+        time.sleep(0.4)
+    return to_df(results).drop_duplicates(subset="url").reset_index(drop=True)
+
+
+LOAD_ERROR = None
+try:
+    ALL_DF = load_all_recipes()
+    print(f"Loaded {len(ALL_DF):,} recipes")
+except Exception as exc:                       # keep the app up and say what failed
+    LOAD_ERROR = f"Could not load recipes: {exc}"
+    ALL_DF = to_df([])
+    print(LOAD_ERROR)
+
+
+# --------------------------------------------------------------------------
+# One filter function drives everything
+# --------------------------------------------------------------------------
+def filter_df(category, group, cal, min_rating):
+    df = ALL_DF
+    if category:
+        df = df[df["category"] == category]
+    if group:
+        df = df[df["group_list"].apply(lambda g: group in g)]
+    if cal == "low":                      # 75 or fewer
+        df = df[df["calories"] <= 75]
+    elif cal == "medium":                 # 76 to 150
+        df = df[(df["calories"] > 75) & (df["calories"] <= 150)]
+    elif cal == "high":                   # over 150
+        df = df[df["calories"] > 150]
+    if min_rating:                        # slider at 0 = any rating
+        df = df[df["rating"] >= min_rating]
+    return df
+
+
+def empty_fig(title):
+    fig = px.bar(title=title)
+    fig.update_layout(xaxis={"visible": False}, yaxis={"visible": False})
+    return fig
+
+
+# --------------------------------------------------------------------------
+# Reusable components and styles (DRY, as in the class notes)
+# --------------------------------------------------------------------------
+def box_style(**extra):
+    """Shared 'box model' styling: border, padding, margin."""
+    style = {"border": "1px solid #ccc", "borderRadius": "8px",
+             "padding": "12px", "margin": "10px"}
+    style.update(extra)
+    return style
+
+
+def make_control(label, component):
+    """A labelled control that sits side by side with the others (inline-block)."""
+    return html.Div([html.Label(label), component],
+                    style={"width": "220px", "display": "inline-block",
+                           "margin": "8px", "verticalAlign": "top",
+                           "textAlign": "left"})
+
+
+def make_dropdown(label, dd_id, options, placeholder):
+    return make_control(label, dcc.Dropdown(id=dd_id, options=options,
+                                            placeholder=placeholder, clearable=True))
+
+
+def recipe_card(rank, r):
+    """One top-5 entry: rank, thumbnail (html.Img), linked name, calories."""
+    pieces = [html.B(f"{rank}.  ")]
+    if isinstance(r.image_url, str) and r.image_url:
+        pieces.append(html.Img(src=r.image_url,
+                               style={"width": "80px", "height": "80px",
+                                      "objectFit": "cover", "borderRadius": "6px",
+                                      "verticalAlign": "top"}))
+    pieces.append(html.Div([
+        html.A(r.name, href=r.url, target="_blank", rel="noopener"),
+        html.Br(),
+        html.Span(f"{r.calories} cal per serving"),
+        html.Br(),
+        html.I(f"{r.rating:.2f} ★ from {r.ratings:,} ratings"),
+    ], style={"display": "inline-block", "verticalAlign": "top",
+              "marginLeft": "12px"}))
+    return html.Div(pieces, style={"textAlign": "left", "margin": "10px 0"})
+
+
+# --------------------------------------------------------------------------
+# Layout
+# --------------------------------------------------------------------------
+app = dash.Dash(__name__)
+
+half = {"width": "49%", "display": "inline-block", "verticalAlign": "top"}
 
 app.layout = html.Div([
-    html.H1("Recipe by Category"),
-    html.Div([
-        html.Div([
-            html.H2("Controls"),
-            html.Br(),
-            html.H3("Recipe Select"),
-            dcc.Dropdown(
-                id="recipe_dd",
-                options=[
-                    {"label": "PRO", "value": "Protein"},
-                    {"label": "VEG", "value": "Vegetables"},
-                    {"label": "DAR", "value": "Dairy"},
-                    {"label": "GRA", "value": "Grains"},
-                    {"label": "FRU", "value": "Fruits"},
-                ],
-                placeholder="All categories",
-                clearable=True,
-                style={"width": "200px", "margin": "0 auto"},
-            ),
-        ], style={"width": "350px", "height": "350px", "display": "inline-block",
-                  "vertical-align": "top", "border": "1px solid black", "padding": "20px"}),
-
-        html.Div([
-            dcc.Graph(id="major_cat"),
-            html.H2("Major Category",
-                    style={"border": "2px solid black", "width": "200px", "margin": "0 auto"}),
-        ], style={"width": "700px", "display": "inline-block"}),
+    html.H1("MyPlate Recipe Explorer"),
+    html.Span([
+        f"Prepared: {datetime.now().date()}",
+        html.Br(),
+        "by ", html.B(AUTHOR), ", ", html.I(ROLE),
     ]),
-], style={"text-align": "center", "display": "inline-block", "width": "100%"})
+
+    html.Div([
+        make_dropdown("Category", "category", CATEGORIES, "All categories"),
+        make_dropdown("Food group", "group",
+                      [{"label": l, "value": v} for l, v in FOOD_GROUPS],
+                      "All food groups"),
+        make_dropdown("Calories per serving", "cal",
+                      [{"label": "Low (75 or fewer)", "value": "low"},
+                       {"label": "Medium (76–150)", "value": "medium"},
+                       {"label": "High (over 150)", "value": "high"}],
+                      "Any"),
+        make_control("Minimum rating (stars)",
+                     dcc.Slider(id="min_rating", min=0, max=5, step=0.5, value=0,
+                                marks={0: "Any", 1: "1", 2: "2", 3: "3",
+                                       4: "4", 5: "5"})),
+    ], style=box_style()),
+
+    html.Div([
+        html.H3("Average rating (1–5)"),
+        html.H1(id="avg_rating"),
+        html.P(id="match_count"),
+        html.P(id="summary_note", style={"color": "#666"}),
+    ], style=box_style(textAlign="center")),
+
+    html.Div([
+        html.H3("Top 5 most popular (by number of ratings)"),
+        html.Div(id="top5"),
+    ], style=box_style()),
+
+    html.Div([
+        html.Div(dcc.Graph(id="cat_count_chart"), style=half),
+        html.Div(dcc.Graph(id="cat_cal_chart"), style=half),
+    ], style=box_style()),
+
+    html.Div([
+        html.H3("All recipes"),
+        dash_table.DataTable(
+            id="recipe_table",
+            columns=[
+                {"name": "Recipe", "id": "recipe", "presentation": "markdown"},
+                {"name": "Category", "id": "category"},
+                {"name": "Calories / serving", "id": "calories", "type": "numeric"},
+                {"name": "Rating", "id": "rating", "type": "numeric"},
+                {"name": "# Ratings", "id": "ratings", "type": "numeric"},
+                {"name": "Food groups", "id": "food_groups"},
+            ],
+            data=[], page_action="native", page_current=0, page_size=PAGE_SIZE,
+            sort_action="native",
+            markdown_options={"link_target": "_blank"},
+            style_cell={"textAlign": "left", "padding": "6px"},
+            style_header={"fontWeight": "bold"},
+        ),
+    ], style=box_style()),
+], style={"maxWidth": "1100px", "margin": "0 auto", "fontFamily": "sans-serif"})
 
 
+# --------------------------------------------------------------------------
+# One callback: change any filter and everything updates together
+# --------------------------------------------------------------------------
 @app.callback(
-    Output("major_cat", "figure"),
-    Input("recipe_dd", "value"),
+    Output(component_id="recipe_table", component_property="data"),
+    Output(component_id="recipe_table", component_property="page_current"),
+    Output(component_id="match_count", component_property="children"),
+    Output(component_id="avg_rating", component_property="children"),
+    Output(component_id="summary_note", component_property="children"),
+    Output(component_id="top5", component_property="children"),
+    Output(component_id="cat_count_chart", component_property="figure"),
+    Output(component_id="cat_cal_chart", component_property="figure"),
+    Input(component_id="category", component_property="value"),
+    Input(component_id="group", component_property="value"),
+    Input(component_id="cal", component_property="value"),
+    Input(component_id="min_rating", component_property="value"),
 )
-def update_plot(selected_category):
-    df = recipes_df.copy()
-    title = "Average Calories by Category: All Recipes"
+def update_dashboard(category, group, cal, min_rating):
+    if LOAD_ERROR:
+        blank = empty_fig("No data")
+        return [], 0, LOAD_ERROR, "–", "", [], blank, blank
 
-    if selected_category:
-        df = df[df["category"] == selected_category]
-        title = f"Average Calories: {selected_category}"
+    df = filter_df(category, group, cal, min_rating)
+    if df.empty:
+        blank = empty_fig("No recipes match these filters")
+        return [], 0, "0 recipes match", "–", "No recipes match these filters.", [], blank, blank
 
-    summary = (df.groupby("category")["calories"]
-                 .mean()
-                 .reset_index(name="Avg Calories"))
+    # Table rows (recipe name is a clickable link)
+    rows = []
+    for rec in df.sort_values("name").to_dict("records"):
+        safe = rec["name"].replace("[", "(").replace("]", ")")
+        rows.append({
+            "recipe": f"[{safe}]({rec['url']})",
+            "category": rec["category"],
+            "calories": rec["calories"],
+            "rating": rec["rating"],
+            "ratings": rec["ratings"],
+            "food_groups": rec["food_groups"],
+        })
 
-    return px.bar(summary, x="Avg Calories", y="category",
-                  color="category", title=title)
+    # Average rating and top 5, over everything that matches
+    avg = f"{df['rating'].mean():.2f} ★"
+    top = df.sort_values(["ratings", "rating"], ascending=False).head(5)
+    cards = [recipe_card(rank, r) for rank, r in enumerate(top.itertuples(), start=1)]
+
+    # Charts
+    by_cat = df.groupby("category").agg(Recipes=("name", "count"),
+                                        AvgCal=("calories", "mean")).reset_index()
+    fig_count = px.bar(by_cat, x="Recipes", y="category", color="category",
+                       text="Recipes", title="Recipes by category")
+    fig_count.update_layout(showlegend=False,
+                            yaxis={"categoryorder": "total ascending", "title": ""})
+    fig_cal = px.bar(by_cat.round({"AvgCal": 0}), x="AvgCal", y="category",
+                     color="category", text="AvgCal",
+                     title="Average calories per serving by category",
+                     labels={"AvgCal": "Avg calories"})
+    fig_cal.update_layout(showlegend=False,
+                          yaxis={"categoryorder": "total ascending", "title": ""})
+
+    return (rows, 0, f"{len(df):,} recipes match", avg,
+            "Average of the ratings of every matching recipe", cards,
+            fig_count, fig_cal)
 
 
-if __name__ == "__main__":
-    app.run(debug=True)   # debug=True shows callback errors in the browser
+if __name__ == '__main__':
+    app.run(debug=False)
 
 
